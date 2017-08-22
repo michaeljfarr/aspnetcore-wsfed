@@ -3,41 +3,57 @@ using System.Collections.Generic;
 using System.IdentityModel.Tokens;
 using System.IO;
 using System.Linq;
-using System.Security.Claims;
-using System.Text;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Xml;
 using Microsoft.AspNetCore.Authentication;
 using AspNetCore.Authentication.WsFederation.Events;
-using Microsoft.AspNetCore.Http.Authentication;
-using Microsoft.AspNetCore.Http.Features.Authentication;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Extensions;
 using Microsoft.IdentityModel.Protocols;
 
 namespace AspNetCore.Authentication.WsFederation
 {
-    public class WsFederationAuthenticationHandler : RemoteAuthenticationHandler<WsFederationAuthenticationOptions>
+    public class WsFederationAuthenticationHandler : RemoteAuthenticationHandler<WsFederationAuthenticationOptions>, Microsoft.AspNetCore.Authentication.IAuthenticationRequestHandler
     {
-        private readonly ILogger _logger;
         private WsFederationConfiguration _configuration;
 
-        public WsFederationAuthenticationHandler(ILogger logger)
+        public WsFederationAuthenticationHandler(IOptionsMonitor<WsFederationAuthenticationOptions> options, ILoggerFactory logger)
+            : base(options, logger, null, null)
         {
-            _logger = logger;
+            _configuration = options.CurrentValue.Configuration;
+        }
+
+        /// <summary>
+        /// First the Options.Events value is checked
+        /// Then a service with Options.EventsType is checked
+        /// then if neither is non-null, this method is called
+        /// </summary>
+        protected override Task<object> CreateEventsAsync()
+        {
+            return Task.FromResult<object>(new WsFederationEvents());
+        }
+
+
+        public override Task<bool> ShouldHandleRequestAsync()
+        {
+            return Task.FromResult<bool>(Options.CallbackPath.HasValue && Options.CallbackPath.Equals(Request.PathBase + Request.Path, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
         ///     Authenticate the user identity with the identity provider.
         ///     The method process the request on the endpoint defined by CallbackPath.
         /// </summary>
-        protected override async Task<AuthenticateResult> HandleRemoteAuthenticateAsync()
+        protected override async Task<HandleRequestResult> HandleRemoteAuthenticateAsync()
         {
             // Allow login to be constrained to a specific path.
-            if (Options.CallbackPath.HasValue && !Options.CallbackPath.Equals(Request.PathBase + Request.Path, StringComparison.OrdinalIgnoreCase))
+            if (!await ShouldHandleRequestAsync())
+                //if (Options.CallbackPath.HasValue && !Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase))
             {
                 // Not for us.
-                return AuthenticateResult.Skip();
+                Logger.LogDebug($"Skipping {Options.CallbackPath} != {Request.Path}");
+                return HandleRequestResult.SkipHandler();
             }
 
             WsFederationMessage wsFederationMessage = null;
@@ -72,74 +88,66 @@ namespace AspNetCore.Authentication.WsFederation
                 if (Options.SkipUnrecognizedRequests)
                 {
                     // Not for us?
-                    return AuthenticateResult.Skip();
+                    return HandleRequestResult.SkipHandler();
                 }
-                return AuthenticateResult.Fail("No message");
+                return HandleRequestResult.Fail("No message");
             }
 
             try
             {
-                var messageReceivedContext = await RunMessageReceivedEventAsync(wsFederationMessage);
-                AuthenticateResult result;
-                if (messageReceivedContext.CheckEventResult(out result))
-                {
-                    return result;
-                }
-
                 if (wsFederationMessage.Wresult == null)
                 {
-                    return AuthenticateResult.Fail("Received a sign-in message without a WResult.");
+                    return HandleRequestResult.Fail("Received a sign-in message without a WResult.");
                 }
 
                 var token = wsFederationMessage.GetToken();
                 if (string.IsNullOrWhiteSpace(token))
                 {
-                    return AuthenticateResult.Fail("Received a sign-in message without a token.");
+                    return HandleRequestResult.Fail("Received a sign-in message without a token.");
                 }
 
                 var securityTokenContext = await RunSecurityTokenReceivedEventAsync(wsFederationMessage);
-                if (securityTokenContext.CheckEventResult(out result))
+                if (securityTokenContext.Result?.Handled == true)
                 {
-                    return result;
+                    return HandleRequestResult.Success(securityTokenContext.Result.Ticket);
                 }
 
                 if (_configuration == null)
                 {
-                    _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
+                    _configuration = await Options.ConfigurationManager.GetConfigurationAsync(CancellationToken.None);
                 }
 
                 // Copy and augment to avoid cross request race conditions for updated configurations.
                 var tvp = Options.TokenValidationParameters.Clone();
-                IEnumerable<string> issuers = new[] {_configuration.Issuer};
+                IEnumerable<string> issuers = new[] { _configuration.Issuer };
                 tvp.ValidIssuers = tvp.ValidIssuers?.Concat(issuers) ?? issuers;
                 tvp.IssuerSigningKeys = tvp.IssuerSigningKeys?.Concat(_configuration.SigningKeys) ??
                                         _configuration.SigningKeys;
+
 
                 SecurityToken parsedToken;
                 var principal = Options.SecurityTokenHandlers.ValidateToken(token, tvp, out parsedToken);
 
                 if (!string.IsNullOrEmpty(Options.BootStrapTokenClaimName) && parsedToken != null)
                 {
-                    ClaimsIdentity identity = principal.Identity as ClaimsIdentity;
+                    var identity = principal.Identity as System.Security.Claims.ClaimsIdentity;
                     if (identity != null)
                     {
-                        StringBuilder sb = new StringBuilder();
-                        var writer = XmlWriter.Create(new StringWriter(sb), new XmlWriterSettings
+                        var sb = new System.Text.StringBuilder();
+                        var writer = System.Xml.XmlWriter.Create(new StringWriter(sb), new System.Xml.XmlWriterSettings
                         {
                             OmitXmlDeclaration = true
                         });
                         Options.SecurityTokenHandlers[parsedToken].WriteToken(writer, parsedToken);
                         writer.Flush();
-                        identity.AddClaim(new Claim(Options.BootStrapTokenClaimName, Convert.ToBase64String(Encoding.UTF8.GetBytes(sb.ToString()))));
+                        identity.AddClaim(new System.Security.Claims.Claim(Options.BootStrapTokenClaimName, Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(sb.ToString()))));
                     }
                 }
-
                 // Retrieve our cached redirect uri
                 var state = wsFederationMessage.Wctx;
                 // WsFed allows for uninitiated logins, state may be missing.
                 var properties = GetPropertiesFromWctx(state);
-                var ticket = new AuthenticationTicket(principal, properties,
-                    Options.AuthenticationScheme);
+                var ticket = new AuthenticationTicket(principal, properties, Scheme.Name);
 
                 if (Options.UseTokenLifetime)
                 {
@@ -159,13 +167,15 @@ namespace AspNetCore.Authentication.WsFederation
 
                 var securityTokenValidatedNotification = await RunSecurityTokenValidatedEventAsync(wsFederationMessage,
                     ticket);
-                return securityTokenValidatedNotification.CheckEventResult(out result)
-                    ? result
-                    : AuthenticateResult.Success(ticket);
+                if (securityTokenValidatedNotification.Result != null && securityTokenValidatedNotification.Result.Handled)
+                {
+                    return HandleRequestResult.Success(securityTokenValidatedNotification.Result.Ticket);
+                }
+                return HandleRequestResult.Success(ticket);
             }
             catch (Exception exception)
             {
-                _logger.LogError("Exception occurred while processing message: ", exception);
+                Logger.LogError("Exception occurred while processing message: ", exception);
 
                 // Refresh the configuration for exceptions that may be caused by key rollovers. The user can also request a refresh in the notification.
                 if (Options.RefreshOnIssuerKeyNotFound &&
@@ -176,9 +186,12 @@ namespace AspNetCore.Authentication.WsFederation
 
                 var authenticationFailedNotification = await RunAuthenticationFailedEventAsync(wsFederationMessage,
                     exception);
-                return authenticationFailedNotification.CheckEventResult(out AuthenticateResult result)
-                    ? result
-                    : AuthenticateResult.Fail(exception);
+
+                if (authenticationFailedNotification.Result != null && authenticationFailedNotification.Result.Handled)
+                {
+                    return HandleRequestResult.Fail(authenticationFailedNotification.Result.Failure);
+                }
+                return HandleRequestResult.Fail(exception);
             }
         }
 
@@ -187,20 +200,27 @@ namespace AspNetCore.Authentication.WsFederation
         ///     deals an authentication interaction as part of it's request flow. (like adding a response header, or
         ///     changing the 401 result to 302 of a login page or external sign-in location.)
         /// </summary>
-        /// <param name="context"></param>
+        /// <param name="properties"></param>
         /// <returns>True if no other handlers should be called</returns>
-        protected override async Task<bool> HandleUnauthorizedAsync(ChallengeContext context)
+        protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
         {
-            if (context == null)
+            if (properties == null)
             {
-                throw new ArgumentNullException(nameof(context));
+                throw new ArgumentNullException(nameof(properties));
             }
-
             Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleUnauthorizedAsync");
 
             if (_configuration == null)
             {
-                _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
+                var httpClient = new HttpClient()
+                {
+                    Timeout = Options.BackchannelTimeout,
+                    MaxResponseContentBufferSize = 1024 * 1024 * 10
+                };
+                // 10 MB
+                var cm = new ConfigurationManager<WsFederationConfiguration>(Options.MetadataAddress, httpClient);
+
+                _configuration = await cm.GetConfigurationAsync(CancellationToken.None);
             }
 
             var baseUri =
@@ -214,7 +234,6 @@ namespace AspNetCore.Authentication.WsFederation
                 Request.Path +
                 Request.QueryString;
 
-            var properties = new AuthenticationProperties(context.Properties);
             if (string.IsNullOrEmpty(properties.RedirectUri))
             {
                 properties.RedirectUri = currentUri;
@@ -235,22 +254,20 @@ namespace AspNetCore.Authentication.WsFederation
                 wsFederationMessage.Wreply = Options.Wreply;
             }
 
-            var redirectContext = new RedirectContext(Context, Options)
+            var redirectContext = new RedirectContext(Context, Options, Scheme)
             {
                 ProtocolMessage = wsFederationMessage,
-                Properties = properties
+                Properties = new Microsoft.AspNetCore.Http.Authentication.AuthenticationProperties(properties.Items)
             };
 
-            await Options.Events.RedirectToIdentityProvider(redirectContext);
-            if (redirectContext.HandledResponse)
+            await Options.WsFedEvents.RedirectToIdentityProvider(redirectContext);
+            if (redirectContext.Result != null && redirectContext.Result.Handled)
             {
                 Logger.LogDebug("RedirectContext.HandledResponse");
-                return true;
             }
-            if (redirectContext.Skipped)
+            if (redirectContext.Result == null || redirectContext.Result.None)
             {
                 Logger.LogDebug("RedirectContext.Skipped");
-                return false;
             }
 
             var redirectUri = redirectContext.ProtocolMessage.CreateSignInUrl();
@@ -259,73 +276,73 @@ namespace AspNetCore.Authentication.WsFederation
                 Logger.LogWarning($"The sign-in redirect URI is malformed: {redirectUri}");
             }
             Response.Redirect(redirectUri);
-            return true;
         }
+
+
 
         /// <summary>
         ///     Handles signout
         /// </summary>
         /// <param name="context"></param>
         /// <returns></returns>
-        protected override async Task HandleSignOutAsync(SignOutContext context)
-        {
-            if (context == null)
-            {
-                return;
-            }
+        //protected override async Task HandleSignOutAsync(SignOutContext context)
+        //{
+        //    if (context == null)
+        //    {
+        //        return;
+        //    }
 
-            Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleSignOutAsync");
+        //    Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleSignOutAsync");
 
-            if (_configuration == null && Options.ConfigurationManager != null)
-            {
-                _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
-            }
+        //    if (_configuration == null && Options.ConfigurationManager != null)
+        //    {
+        //        _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
+        //    }
 
-            var wsFederationMessage = new WsFederationMessage
-            {
-                IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
-                Wtrealm = Options.Wtrealm,
-                Wa = WsFederationActions.SignOut
-            };
+        //    var wsFederationMessage = new WsFederationMessage
+        //    {
+        //        IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
+        //        Wtrealm = Options.Wtrealm,
+        //        Wa = WsFederationActions.SignOut
+        //    };
 
-            var properties = new AuthenticationProperties(context.Properties);
-            if (!string.IsNullOrEmpty(properties?.RedirectUri))
-            {
-                wsFederationMessage.Wreply = properties.RedirectUri;
-            }
-            else if (!string.IsNullOrWhiteSpace(Options.SignOutWreply))
-            {
-                wsFederationMessage.Wreply = Options.SignOutWreply;
-            }
-            else if (!string.IsNullOrWhiteSpace(Options.Wreply))
-            {
-                wsFederationMessage.Wreply = Options.Wreply;
-            }
+        //    var properties = new AuthenticationProperties(context.Properties);
+        //    if (!string.IsNullOrEmpty(properties?.RedirectUri))
+        //    {
+        //        wsFederationMessage.Wreply = properties.RedirectUri;
+        //    }
+        //    else if (!string.IsNullOrWhiteSpace(Options.SignOutWreply))
+        //    {
+        //        wsFederationMessage.Wreply = Options.SignOutWreply;
+        //    }
+        //    else if (!string.IsNullOrWhiteSpace(Options.Wreply))
+        //    {
+        //        wsFederationMessage.Wreply = Options.Wreply;
+        //    }
 
-            var redirectContext = new RedirectContext(Context, Options)
-            {
-                ProtocolMessage = wsFederationMessage
-            };
-            await Options.Events.RedirectToIdentityProvider(redirectContext);
-            if (redirectContext.HandledResponse)
-            {
-                Logger.LogDebug("RedirectContext.HandledResponse");
-                return;
-            }
-            if (redirectContext.Skipped)
-            {
-                Logger.LogDebug("RedirectContext.Skipped");
-                return;
-            }
+        //    var redirectContext = new RedirectContext(Context, Options)
+        //    {
+        //        ProtocolMessage = wsFederationMessage
+        //    };
+        //    await Options.Events.RedirectToIdentityProvider(redirectContext);
+        //    if (redirectContext.HandledResponse)
+        //    {
+        //        Logger.LogDebug("RedirectContext.HandledResponse");
+        //        return;
+        //    }
+        //    if (redirectContext.Skipped)
+        //    {
+        //        Logger.LogDebug("RedirectContext.Skipped");
+        //        return;
+        //    }
 
-            var redirectUri = redirectContext.ProtocolMessage.CreateSignOutUrl();
-            if (!Uri.IsWellFormedUriString(redirectUri, UriKind.Absolute))
-            {
-                Logger.LogWarning($"The sign-out redirect URI is malformed: {redirectUri}");
-            }
-            Response.Redirect(redirectUri);
-        }
-
+        //    var redirectUri = redirectContext.ProtocolMessage.CreateSignOutUrl();
+        //    if (!Uri.IsWellFormedUriString(redirectUri, UriKind.Absolute))
+        //    {
+        //        Logger.LogWarning($"The sign-out redirect URI is malformed: {redirectUri}");
+        //    }
+        //    Response.Redirect(redirectUri);
+        //}
         private AuthenticationProperties GetPropertiesFromWctx(string state)
         {
             AuthenticationProperties properties = null;
@@ -342,43 +359,22 @@ namespace AspNetCore.Authentication.WsFederation
             return properties;
         }
 
-        private async Task<MessageReceivedContext> RunMessageReceivedEventAsync(WsFederationMessage message)
-        {
-            Logger.LogTrace($"MessageReceived: {message.BuildRedirectUrl()}");
-            var messageReceivedContext = new MessageReceivedContext(Context, Options)
-            {
-                ProtocolMessage = message
-            };
-
-            await Options.Events.MessageReceived(messageReceivedContext);
-            if (messageReceivedContext.HandledResponse)
-            {
-                Logger.LogDebug("MessageReceivedContext.HandledResponse");
-            }
-            else if (messageReceivedContext.Skipped)
-            {
-                Logger.LogDebug("MessageReceivedContext.Skipped");
-            }
-
-            return messageReceivedContext;
-        }
-
         private async Task<SecurityTokenContext> RunSecurityTokenReceivedEventAsync(WsFederationMessage message)
         {
             Logger.LogTrace($"SecurityTokenReceived: {message.GetToken()}");
-            var securityTokenContext = new SecurityTokenContext(Context, Options)
+            var securityTokenContext = new SecurityTokenContext(Context, Options, Scheme)
             {
                 ProtocolMessage = message
             };
 
-            await Options.Events.SecurityTokenReceived(securityTokenContext);
-            if (securityTokenContext.HandledResponse)
+            await Options.WsFedEvents.SecurityTokenReceived(securityTokenContext);
+            if (securityTokenContext.Result != null && securityTokenContext.Result.Handled)
             {
                 Logger.LogDebug("SecurityTokenContext.HandledResponse");
             }
-            else if (securityTokenContext.Skipped)
+            else if (securityTokenContext.Result == null || securityTokenContext.Result.None)
             {
-                Logger.LogDebug("SecurityTokenContext.HandledResponse");
+                Logger.LogDebug("SecurityTokenContext.Skipped");
             }
 
             return securityTokenContext;
@@ -389,18 +385,19 @@ namespace AspNetCore.Authentication.WsFederation
             AuthenticationTicket ticket)
         {
             Logger.LogTrace($"SecurityTokenValidated: {ticket.AuthenticationScheme} {ticket.Principal.Identity.Name}");
-            var securityTokenValidateContext = new SecurityTokenValidatedContext(Context, Options)
+            var securityTokenValidateContext = new SecurityTokenValidatedContext(Context, Options, Scheme)
             {
                 ProtocolMessage = message,
                 Ticket = ticket
             };
 
-            await Options.Events.SecurityTokenValidated(securityTokenValidateContext);
-            if (securityTokenValidateContext.HandledResponse)
+            await Options.WsFedEvents.SecurityTokenValidated(securityTokenValidateContext);
+
+            if (securityTokenValidateContext.Result != null && securityTokenValidateContext.Result.Handled)
             {
                 Logger.LogDebug("SecurityTokenValidatedContext.HandledResponse");
             }
-            else if (securityTokenValidateContext.Skipped)
+            else if (securityTokenValidateContext.Result == null || securityTokenValidateContext.Result.None)
             {
                 Logger.LogDebug("SecurityTokenValidatedContext.Skipped");
             }
@@ -408,22 +405,18 @@ namespace AspNetCore.Authentication.WsFederation
             return securityTokenValidateContext;
         }
 
-        private async Task<AuthenticationFailedContext> RunAuthenticationFailedEventAsync(WsFederationMessage message,
+        private async Task<RemoteFailureContext> RunAuthenticationFailedEventAsync(WsFederationMessage message,
             Exception exception)
         {
             Logger.LogTrace("AuthenticationFailed");
-            var authenticationFailedContext = new AuthenticationFailedContext(Context, Options)
-            {
-                ProtocolMessage = message,
-                Exception = exception
-            };
+            var authenticationFailedContext = new RemoteFailureContext(Context, this.Scheme, Options, exception);
 
-            await Options.Events.AuthenticationFailed(authenticationFailedContext);
-            if (authenticationFailedContext.HandledResponse)
+            await Options.Events.OnRemoteFailure(authenticationFailedContext);
+            if (authenticationFailedContext.Result != null && authenticationFailedContext.Result.Handled)
             {
                 Logger.LogDebug("AuthenticationFailedContext.HandledResponse");
             }
-            else if (authenticationFailedContext.Skipped)
+            else if (authenticationFailedContext.Result == null || authenticationFailedContext.Result.None)
             {
                 Logger.LogDebug("AuthenticationFailedContext.Skipped");
             }
@@ -438,7 +431,7 @@ namespace AspNetCore.Authentication.WsFederation
 
         private static IDictionary<string, List<string>> ParseDelimited(string text)
         {
-            char[] delimiters = {'&', ';'};
+            char[] delimiters = { '&', ';' };
             var accumulator = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             var textLength = text.Length;
             var equalIndex = text.IndexOf('=');
@@ -467,7 +460,7 @@ namespace AspNetCore.Authentication.WsFederation
                     List<string> existing;
                     if (!accumulator.TryGetValue(name, out existing))
                     {
-                        accumulator.Add(name, new List<string>(1) {value});
+                        accumulator.Add(name, new List<string>(1) { value });
                     }
                     else
                     {

@@ -5,9 +5,10 @@ namespace AspNetCore.Authentication.WsFederation.Events
 {
     public class SecurityTokenValidatedContext : BaseWsFederationContext
     {
-        public SecurityTokenValidatedContext(HttpContext context, WsFederationAuthenticationOptions options)
-            : base(context, options)
+        public SecurityTokenValidatedContext(HttpContext context, WsFederationAuthenticationOptions options, AuthenticationScheme authenticationScheme) : base(context, options, authenticationScheme)
         {
         }
+
+        public AuthenticationTicket Ticket { get; set; }
     }
 }

@@ -2,9 +2,11 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Sample
 {
@@ -27,8 +29,18 @@ namespace Sample
         {
             // Add framework services.
             services.AddMvc();
-            services.AddAuthentication(
-                options => options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme);
+
+            services.Configure<WsFederationAuthenticationOptions>(Configuration.GetSection("ADFS"));
+            services.AddSingleton<IOptionsMonitor<WsFederationAuthenticationOptions>, WsFederationPostConfigureOptions>();
+
+            services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                .AddCookie(o =>
+                {
+                    o.LoginPath = new PathString("/Account/Login/");
+                    o.ReturnUrlParameter = "source";
+                })
+                .AddRemoteScheme<WsFederationAuthenticationOptions, WsFederationAuthenticationHandler>(WsFederationAuthenticationDefaults.AuthenticationType, "Ws-Fed", null);
+
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -47,18 +59,7 @@ namespace Sample
                 app.UseExceptionHandler("/Home/Error");
             }
 
-            app.UseCookieAuthentication(new CookieAuthenticationOptions()
-            {
-                AutomaticChallenge = true,
-                ReturnUrlParameter = "source"
-            });
-
-            app.UseWsFederationAuthentication(new WsFederationAuthenticationOptions
-            {
-                Wtrealm = "https://cdrobisonxactware.onmicrosoft.com/eb81d25f-9da5-4ed9-af4d-709769a91c6a",
-                MetadataAddress =
-                    "https://login.windows.net/96708752-4aec-4318-beca-c25ff9bffc1f/FederationMetadata/2007-06/FederationMetadata.xml"
-            });
+            app.UseAuthentication();
 
             app.UseStaticFiles();
 

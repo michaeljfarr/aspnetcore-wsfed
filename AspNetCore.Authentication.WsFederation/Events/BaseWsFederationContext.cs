@@ -5,14 +5,12 @@ using Microsoft.IdentityModel.Protocols;
 
 namespace AspNetCore.Authentication.WsFederation
 {
-    public class BaseWsFederationContext : BaseControlContext
+    public class BaseWsFederationContext : HandleRequestContext<RemoteAuthenticationOptions>
     {
-        public BaseWsFederationContext(HttpContext context, WsFederationAuthenticationOptions options) : base(context)
+        public BaseWsFederationContext(HttpContext context, WsFederationAuthenticationOptions options, AuthenticationScheme authenticationScheme) :
+            base(context, authenticationScheme, options)
         {
-            Options = options ?? throw new ArgumentNullException(nameof(options));
         }
-
-        public WsFederationAuthenticationOptions Options { get; }
 
         public WsFederationMessage ProtocolMessage { get; set; }
     }

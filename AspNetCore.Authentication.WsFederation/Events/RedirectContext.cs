@@ -1,11 +1,12 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using AuthenticationProperties = Microsoft.AspNetCore.Http.Authentication.AuthenticationProperties;
 
 namespace AspNetCore.Authentication.WsFederation
 {
     public class RedirectContext : BaseWsFederationContext
     {
-        public RedirectContext(HttpContext context, WsFederationAuthenticationOptions options) : base(context, options)
+        public RedirectContext(HttpContext context, WsFederationAuthenticationOptions options, AuthenticationScheme authenticationScheme) : base(context, options, authenticationScheme)
         {
         }
 

@@ -5,8 +5,8 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Authentication;
 using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Tokens;
 
 namespace AspNetCore.Authentication.WsFederation
 {
@@ -25,13 +25,10 @@ namespace AspNetCore.Authentication.WsFederation
         /// <summary>
         /// Initializes a new <see cref="WsFederationAuthenticationOptions"/>
         /// </summary>
-        /// <param name="authenticationScheme"> corresponds to the IIdentity AuthenticationType property. <see cref="AuthenticationOptions.AuthenticationScheme"/>.</param>
+        /// <param name="authenticationScheme"> corresponds to the IIdentity AuthenticationType property. <see cref="AuthenticationScheme"/>.</param>
         public WsFederationAuthenticationOptions(string authenticationScheme)
         {
-            AutomaticAuthenticate = true;
-            AuthenticationScheme = authenticationScheme;
             CallbackPath = new PathString("/signin-wsfed");
-            DisplayName = WsFederationAuthenticationDefaults.Caption;
             BackchannelTimeout = TimeSpan.FromMinutes(1);
             UseTokenLifetime = true;
             RefreshOnIssuerKeyNotFound = true;
@@ -82,7 +79,7 @@ namespace AspNetCore.Authentication.WsFederation
         /// <summary>
         /// Gets or sets the <see cref="IWsFederationEvents"/> to call when processing WsFederation messages.
         /// </summary>
-        public new IWsFederationEvents Events { get; set; }
+        public WsFederationEvents WsFedEvents => (WsFederationEvents)Events;
 
         /// <summary>
         /// Gets or sets the <see cref="SecurityTokenHandlerCollection"/> of <see cref="SecurityTokenHandler"/>s used to read and validate <see cref="SecurityToken"/>s.
@@ -112,7 +109,7 @@ namespace AspNetCore.Authentication.WsFederation
         /// This is disabled by default.
         /// </summary>
         public bool SkipUnrecognizedRequests { get; set; } = false;
-        
+
         /// <summary>
         /// Gets or sets the 'wreply'.
         /// </summary>

@@ -18,13 +18,13 @@ namespace Sample.Controllers
                 return Redirect(source);
             }
 
-            return Challenge(new AuthenticationProperties { RedirectUri = source },
+            return Challenge(new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = source },
                 WsFederationAuthenticationDefaults.AuthenticationType);
         }
 
         public IActionResult Logout()
         {
-            return SignOut(new AuthenticationProperties { RedirectUri = "http://localhost:8550/" },
+            return SignOut(new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "http://localhost:8550/" },
                 CookieAuthenticationDefaults.AuthenticationScheme,
                 WsFederationAuthenticationDefaults.AuthenticationType);
         }
