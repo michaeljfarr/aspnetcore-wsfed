@@ -1,12 +1,9 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Security;
-using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Extensions;
 using Microsoft.IdentityModel.Protocols;

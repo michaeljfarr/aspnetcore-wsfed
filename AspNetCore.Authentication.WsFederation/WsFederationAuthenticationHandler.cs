@@ -43,7 +43,7 @@ namespace AspNetCore.Authentication.WsFederation
 
         public override Task<bool> ShouldHandleRequestAsync()
         {
-            return Task.FromResult<bool>(Options.CallbackPath.HasValue && Options.CallbackPath.Equals(Request.PathBase + Request.Path, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult<bool>(Options.CallbackPath.HasValue && Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -62,7 +62,7 @@ namespace AspNetCore.Authentication.WsFederation
             }
 
             WsFederationMessage wsFederationMessage = null;
-
+            
             // assumption: if the ContentType is "application/x-www-form-urlencoded" it should be safe to read as it is small.
             if (string.Equals(Request.Method, "POST", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(Request.ContentType)
@@ -285,11 +285,7 @@ namespace AspNetCore.Authentication.WsFederation
 
 
 
-        /// <summary>
-        ///     Handles signout
-        /// </summary>
-        /// <param name="properties"></param>
-        /// <returns></returns>
+        /// <inheritdoc />
         public async Task SignOutAsync(AuthenticationProperties properties)
         {
 
