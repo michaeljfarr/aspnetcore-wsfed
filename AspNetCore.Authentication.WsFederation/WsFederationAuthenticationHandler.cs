@@ -16,7 +16,7 @@ using Microsoft.IdentityModel.Protocols;
 
 namespace AspNetCore.Authentication.WsFederation
 {
-    public class WsFederationAuthenticationHandler : RemoteAuthenticationHandler<WsFederationAuthenticationOptions>, Microsoft.AspNetCore.Authentication.IAuthenticationRequestHandler
+    public class WsFederationAuthenticationHandler : RemoteAuthenticationHandler<WsFederationAuthenticationOptions>, IAuthenticationSignOutHandler
     {
         private WsFederationConfiguration _configuration;
 
@@ -28,7 +28,6 @@ namespace AspNetCore.Authentication.WsFederation
             {
                 Logger.LogCritical("Configuration and ConfigurationManager are both null.  WsFederationPostConfigureOptions should at least configure ConfigurationManager.");
             }
-            var instance = options.Get("");
         }
 
         /// <summary>
@@ -55,7 +54,7 @@ namespace AspNetCore.Authentication.WsFederation
         {
             // Allow login to be constrained to a specific path.
             if (!await ShouldHandleRequestAsync())
-                //if (Options.CallbackPath.HasValue && !Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase))
+            //if (Options.CallbackPath.HasValue && !Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase))
             {
                 // Not for us.
                 Logger.LogDebug($"Skipping {Options.CallbackPath} != {Request.Path}");
@@ -289,66 +288,67 @@ namespace AspNetCore.Authentication.WsFederation
         /// <summary>
         ///     Handles signout
         /// </summary>
-        /// <param name="context"></param>
+        /// <param name="properties"></param>
         /// <returns></returns>
-        //protected override async Task HandleSignOutAsync(SignOutContext context)
-        //{
-        //    if (context == null)
-        //    {
-        //        return;
-        //    }
+        public async Task SignOutAsync(AuthenticationProperties properties)
+        {
 
-        //    Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleSignOutAsync");
+            if (properties == null)
+            {
+                return;
+            }
 
-        //    if (_configuration == null && Options.ConfigurationManager != null)
-        //    {
-        //        _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
-        //    }
+            Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleSignOutAsync");
 
-        //    var wsFederationMessage = new WsFederationMessage
-        //    {
-        //        IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
-        //        Wtrealm = Options.Wtrealm,
-        //        Wa = WsFederationActions.SignOut
-        //    };
+            if (_configuration == null && Options.ConfigurationManager != null)
+            {
+                _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
+            }
 
-        //    var properties = new AuthenticationProperties(context.Properties);
-        //    if (!string.IsNullOrEmpty(properties?.RedirectUri))
-        //    {
-        //        wsFederationMessage.Wreply = properties.RedirectUri;
-        //    }
-        //    else if (!string.IsNullOrWhiteSpace(Options.SignOutWreply))
-        //    {
-        //        wsFederationMessage.Wreply = Options.SignOutWreply;
-        //    }
-        //    else if (!string.IsNullOrWhiteSpace(Options.Wreply))
-        //    {
-        //        wsFederationMessage.Wreply = Options.Wreply;
-        //    }
+            var wsFederationMessage = new WsFederationMessage
+            {
+                IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
+                Wtrealm = Options.Wtrealm,
+                Wa = WsFederationActions.SignOut
+            };
 
-        //    var redirectContext = new RedirectContext(Context, Options)
-        //    {
-        //        ProtocolMessage = wsFederationMessage
-        //    };
-        //    await Options.Events.RedirectToIdentityProvider(redirectContext);
-        //    if (redirectContext.HandledResponse)
-        //    {
-        //        Logger.LogDebug("RedirectContext.HandledResponse");
-        //        return;
-        //    }
-        //    if (redirectContext.Skipped)
-        //    {
-        //        Logger.LogDebug("RedirectContext.Skipped");
-        //        return;
-        //    }
+            if (!string.IsNullOrEmpty(properties?.RedirectUri))
+            {
+                wsFederationMessage.Wreply = properties.RedirectUri;
+            }
+            else if (!string.IsNullOrWhiteSpace(Options.SignOutWreply))
+            {
+                wsFederationMessage.Wreply = Options.SignOutWreply;
+            }
+            else if (!string.IsNullOrWhiteSpace(Options.Wreply))
+            {
+                wsFederationMessage.Wreply = Options.Wreply;
+            }
 
-        //    var redirectUri = redirectContext.ProtocolMessage.CreateSignOutUrl();
-        //    if (!Uri.IsWellFormedUriString(redirectUri, UriKind.Absolute))
-        //    {
-        //        Logger.LogWarning($"The sign-out redirect URI is malformed: {redirectUri}");
-        //    }
-        //    Response.Redirect(redirectUri);
-        //}
+            var redirectContext = new RedirectContext(Context, Options, Scheme)
+            {
+                ProtocolMessage = wsFederationMessage
+            };
+            await Options.WsFedEvents.RedirectToIdentityProvider(redirectContext);
+            if (redirectContext.Result != null && redirectContext.Result.Handled)
+            {
+                Logger.LogDebug("RedirectContext.HandledResponse");
+                return;
+            }
+            if (redirectContext.Result != null && redirectContext.Result.Skipped)
+            {
+                Logger.LogDebug("RedirectContext.Skipped");
+                return;
+            }
+
+            var redirectUri = redirectContext.ProtocolMessage.CreateSignOutUrl();
+            if (!Uri.IsWellFormedUriString(redirectUri, UriKind.Absolute))
+            {
+                Logger.LogWarning($"The sign-out redirect URI is malformed: {redirectUri}");
+            }
+            Response.Redirect(redirectUri);
+        }
+
         private AuthenticationProperties GetPropertiesFromWctx(string state)
         {
             AuthenticationProperties properties = null;

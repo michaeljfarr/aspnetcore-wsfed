@@ -29,6 +29,8 @@ namespace AspNetCore.Authentication.WsFederation
         public void PostConfigure(string name, WsFederationAuthenticationOptions options)
         {
             //SignInScheme will be provided by AuthenticationBuilder.EnsureSignInScheme if not provided by something else.
+            //However, for reasons that I can't understand, this method always gets called with an uninitialised options and an empty name value
+            //I'm guessing that is just a bug somewhere in the DefaultAuthorizationPolicyProvider when it attempts to fetch the default configuration.
             if (!string.IsNullOrEmpty(options.SignInScheme))
             {
                 ApplyDefaults(options);
