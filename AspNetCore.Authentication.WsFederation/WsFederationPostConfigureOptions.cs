@@ -13,109 +13,87 @@ using Microsoft.IdentityModel.Protocols;
 
 namespace AspNetCore.Authentication.WsFederation
 {
-    public class WsFederationPostConfigureOptions : IOptionsMonitor<WsFederationAuthenticationOptions>, IPostConfigureOptions<WsFederationAuthenticationOptions>
+    public class WsFederationPostConfigureOptions : IPostConfigureOptions<WsFederationAuthenticationOptions>
     {
         private readonly IDataProtectionProvider _dataProtectionProvider;
 
-        public WsFederationAuthenticationOptions Get(string name)
-        {
-            return CurrentValue;
-        }
-
-        public IDisposable OnChange(Action<WsFederationAuthenticationOptions, string> listener)
-        {
-            throw new NotImplementedException();
-        }
-
-        public WsFederationAuthenticationOptions CurrentValue { get; private set; }
-
-        public WsFederationPostConfigureOptions(
-            IOptions<WsFederationAuthenticationOptions> options,
-            IDataProtectionProvider dataProtectionProvider)
+        public WsFederationPostConfigureOptions(IDataProtectionProvider dataProtectionProvider)
         {
             _dataProtectionProvider = dataProtectionProvider;
-            ApplyDefaults(options.Value);
         }
 
         private void ApplyDefaults(WsFederationAuthenticationOptions wsFederationAuthenticationOptions)
+        {
+            ConfigureOptions(_dataProtectionProvider, wsFederationAuthenticationOptions);
+        }
+        public void PostConfigure(string name, WsFederationAuthenticationOptions options)
+        {
+            //SignInScheme will be provided by AuthenticationBuilder.EnsureSignInScheme if not provided by something else.
+            if (!string.IsNullOrEmpty(options.SignInScheme))
+            {
+                ApplyDefaults(options);
+            }
+        }
+
+        private static void ConfigureOptions(IDataProtectionProvider dataProtectionProvider, WsFederationAuthenticationOptions wsFederationAuthenticationOptions)
         {
             if (string.IsNullOrEmpty(wsFederationAuthenticationOptions.SignInScheme))
             {
                 throw new ArgumentException("Options.SignInScheme is required.");
             }
-            var nextValue = new WsFederationAuthenticationOptions()
-            {
-                SignInScheme = wsFederationAuthenticationOptions.SignInScheme,
-                TokenValidationParameters = wsFederationAuthenticationOptions.TokenValidationParameters,
-                Configuration = wsFederationAuthenticationOptions.Configuration,
-                ClaimsIssuer = wsFederationAuthenticationOptions.ClaimsIssuer,
-                Backchannel = wsFederationAuthenticationOptions.Backchannel,
-                BackchannelCertificateValidator = wsFederationAuthenticationOptions.BackchannelCertificateValidator,
-                BackchannelHttpHandler = wsFederationAuthenticationOptions.BackchannelHttpHandler,
-                BackchannelTimeout = wsFederationAuthenticationOptions.BackchannelTimeout,
-                CallbackPath = wsFederationAuthenticationOptions.CallbackPath,
-                ConfigurationManager = wsFederationAuthenticationOptions.ConfigurationManager,
-                CorrelationCookie = wsFederationAuthenticationOptions.CorrelationCookie,
-                DataProtectionProvider = wsFederationAuthenticationOptions.DataProtectionProvider,
-                Events = wsFederationAuthenticationOptions.Events,//note the framework will call WsFederationAuthenticationHandler.CreateEventsAsync if this and EventsType is null
-                EventsType = wsFederationAuthenticationOptions.EventsType,
-                MetadataAddress = wsFederationAuthenticationOptions.MetadataAddress,
-                RefreshOnIssuerKeyNotFound = wsFederationAuthenticationOptions.RefreshOnIssuerKeyNotFound,
-                RemoteAuthenticationTimeout = wsFederationAuthenticationOptions.RemoteAuthenticationTimeout,
-                SaveTokens = wsFederationAuthenticationOptions.SaveTokens,
-                SecurityTokenHandlers = wsFederationAuthenticationOptions.SecurityTokenHandlers ??
-                                        SecurityTokenHandlerCollectionExtensions.GetDefaultHandlers(),
-                SignOutWreply = wsFederationAuthenticationOptions.SignOutWreply,
-                SkipUnrecognizedRequests = wsFederationAuthenticationOptions.SkipUnrecognizedRequests,
-                StateDataFormat = wsFederationAuthenticationOptions.StateDataFormat ?? new PropertiesDataFormat(
-                                      _dataProtectionProvider.CreateProtector(
-                                          typeof(WsFederationPostConfigureOptions).FullName,
-                                          typeof(string).FullName,
-                                          wsFederationAuthenticationOptions.SignInScheme,
-                                          "v1"
-                                      )),
-                UseTokenLifetime = wsFederationAuthenticationOptions.UseTokenLifetime,
-                Wreply = wsFederationAuthenticationOptions.Wreply,
-                Wtrealm = wsFederationAuthenticationOptions.Wtrealm
-            };
 
-            if (string.IsNullOrWhiteSpace(nextValue.TokenValidationParameters.AuthenticationType))
+
+            wsFederationAuthenticationOptions.SecurityTokenHandlers =
+                wsFederationAuthenticationOptions.SecurityTokenHandlers ??
+                SecurityTokenHandlerCollectionExtensions.GetDefaultHandlers();
+            wsFederationAuthenticationOptions.StateDataFormat =
+                wsFederationAuthenticationOptions.StateDataFormat ?? new PropertiesDataFormat(
+                    dataProtectionProvider.CreateProtector(
+                        typeof(WsFederationPostConfigureOptions).FullName,
+                        typeof(string).FullName,
+                        wsFederationAuthenticationOptions.SignInScheme,
+                        "v1"
+                    ));
+            wsFederationAuthenticationOptions.UseTokenLifetime = wsFederationAuthenticationOptions.UseTokenLifetime;
+            wsFederationAuthenticationOptions.Wreply = wsFederationAuthenticationOptions.Wreply;
+            wsFederationAuthenticationOptions.Wtrealm = wsFederationAuthenticationOptions.Wtrealm;
+
+            if (string.IsNullOrWhiteSpace(wsFederationAuthenticationOptions.TokenValidationParameters.AuthenticationType))
             {
-                nextValue.TokenValidationParameters.AuthenticationType = nextValue.SignInScheme;
+                wsFederationAuthenticationOptions.TokenValidationParameters.AuthenticationType = wsFederationAuthenticationOptions.SignInScheme;
             }
-            if (string.IsNullOrWhiteSpace(nextValue.TokenValidationParameters.ValidAudience))
+            if (string.IsNullOrWhiteSpace(wsFederationAuthenticationOptions.TokenValidationParameters.ValidAudience))
             {
-                nextValue.TokenValidationParameters.ValidAudience = nextValue.Wtrealm;
+                wsFederationAuthenticationOptions.TokenValidationParameters.ValidAudience = wsFederationAuthenticationOptions.Wtrealm;
             }
 
 
             Uri wreply;
-            if (!nextValue.CallbackPath.HasValue && !string.IsNullOrEmpty(nextValue.Wreply) &&
-                Uri.TryCreate(nextValue.Wreply, UriKind.Absolute, out wreply))
+            if (!wsFederationAuthenticationOptions.CallbackPath.HasValue && !string.IsNullOrEmpty(wsFederationAuthenticationOptions.Wreply) &&
+                Uri.TryCreate(wsFederationAuthenticationOptions.Wreply, UriKind.Absolute, out wreply))
             {
-                nextValue.CallbackPath = PathString.FromUriComponent(wreply);
+                wsFederationAuthenticationOptions.CallbackPath = PathString.FromUriComponent(wreply);
             }
 
-            if (nextValue.ConfigurationManager == null)
+            if (wsFederationAuthenticationOptions.ConfigurationManager == null)
             {
-                if (nextValue.Configuration != null)
+                if (wsFederationAuthenticationOptions.Configuration != null)
                 {
-                    nextValue.ConfigurationManager =
-                        new StaticConfigurationManager<WsFederationConfiguration>(nextValue.Configuration);
+                    wsFederationAuthenticationOptions.ConfigurationManager =
+                        new StaticConfigurationManager<WsFederationConfiguration>(wsFederationAuthenticationOptions.Configuration);
                 }
                 else
                 {
-                    var httpClient = new HttpClient(ResolveHttpMessageHandler(nextValue))
+                    var httpClient = new HttpClient(ResolveHttpMessageHandler(wsFederationAuthenticationOptions))
                     {
-                        Timeout = nextValue.BackchannelTimeout,
+                        Timeout = wsFederationAuthenticationOptions.BackchannelTimeout,
                         MaxResponseContentBufferSize = 1024 * 1024 * 10
                     };
                     // 10 MB
-                    nextValue.ConfigurationManager =
-                        new ConfigurationManager<WsFederationConfiguration>(nextValue.MetadataAddress, httpClient);
+                    wsFederationAuthenticationOptions.ConfigurationManager =
+                        new ConfigurationManager<WsFederationConfiguration>(wsFederationAuthenticationOptions.MetadataAddress, httpClient);
                 }
             }
-            CurrentValue = nextValue;
         }
 
         private static HttpMessageHandler ResolveHttpMessageHandler(WsFederationAuthenticationOptions options)
@@ -138,11 +116,6 @@ namespace AspNetCore.Authentication.WsFederation
             }
 
             return handler;
-        }
-
-        public void PostConfigure(string name, WsFederationAuthenticationOptions options)
-        {
-            ApplyDefaults(options);
         }
     }
 }

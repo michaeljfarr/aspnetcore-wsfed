@@ -18,15 +18,6 @@ namespace AspNetCore.Authentication.WsFederation
         /// Initializes a new <see cref="WsFederationAuthenticationOptions"/>
         /// </summary>
         public WsFederationAuthenticationOptions()
-            : this(WsFederationAuthenticationDefaults.AuthenticationType)
-        {
-        }
-
-        /// <summary>
-        /// Initializes a new <see cref="WsFederationAuthenticationOptions"/>
-        /// </summary>
-        /// <param name="authenticationScheme"> corresponds to the IIdentity AuthenticationType property. <see cref="AuthenticationScheme"/>.</param>
-        public WsFederationAuthenticationOptions(string authenticationScheme)
         {
             CallbackPath = new PathString("/signin-wsfed");
             BackchannelTimeout = TimeSpan.FromMinutes(1);

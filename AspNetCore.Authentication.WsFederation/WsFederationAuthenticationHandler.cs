@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
@@ -19,10 +20,15 @@ namespace AspNetCore.Authentication.WsFederation
     {
         private WsFederationConfiguration _configuration;
 
-        public WsFederationAuthenticationHandler(IOptionsMonitor<WsFederationAuthenticationOptions> options, ILoggerFactory logger)
-            : base(options, logger, null, null)
+        public WsFederationAuthenticationHandler(IOptionsMonitor<WsFederationAuthenticationOptions> options, ILoggerFactory logger, UrlEncoder encoder, ISystemClock clock)
+            : base(options, logger, encoder, clock)
         {
             _configuration = options.CurrentValue.Configuration;
+            if (options.CurrentValue.Configuration == null && options.CurrentValue.ConfigurationManager == null)
+            {
+                Logger.LogCritical("Configuration and ConfigurationManager are both null.  WsFederationPostConfigureOptions should at least configure ConfigurationManager.");
+            }
+            var instance = options.Get("");
         }
 
         /// <summary>

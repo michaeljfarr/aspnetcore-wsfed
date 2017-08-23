@@ -30,8 +30,8 @@ namespace Sample
             // Add framework services.
             services.AddMvc();
 
-            services.Configure<WsFederationAuthenticationOptions>(Configuration.GetSection("ADFS"));
-            services.AddSingleton<IOptionsMonitor<WsFederationAuthenticationOptions>, WsFederationPostConfigureOptions>();
+            services.Configure<WsFederationAuthenticationOptions>(WsFederationAuthenticationDefaults.AuthenticationType, Configuration.GetSection("ADFS"));
+            services.AddSingleton<IPostConfigureOptions<WsFederationAuthenticationOptions>, WsFederationPostConfigureOptions>();
 
             services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
                 .AddCookie(o =>
