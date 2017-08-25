@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
 using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,17 +19,26 @@ namespace AspNetCore.Authentication.WsFederation
 {
     public class WsFederationAuthenticationHandler : RemoteAuthenticationHandler<WsFederationAuthenticationOptions>, IAuthenticationSignOutHandler
     {
-        private WsFederationConfiguration _configuration;
-
         public WsFederationAuthenticationHandler(IOptionsMonitor<WsFederationAuthenticationOptions> options, ILoggerFactory logger, UrlEncoder encoder, ISystemClock clock)
             : base(options, logger, encoder, clock)
         {
-            _configuration = options.CurrentValue.Configuration;
-            if (options.CurrentValue.Configuration == null && options.CurrentValue.ConfigurationManager == null)
+        }
+
+        private async Task<WsFederationConfiguration> GetWsFederationConfiguration()
+        {
+            if (Options.Configuration == null && Options.ConfigurationManager == null)
             {
                 Logger.LogCritical("Configuration and ConfigurationManager are both null.  WsFederationPostConfigureOptions should at least configure ConfigurationManager.");
             }
+            if (Options.ConfigurationManager != null)
+            {
+                //in theory ConfigurationManager is caching and refreshing this data appropriately, so we dont need to hold on to an instance of this.
+                var configuration = await Options.ConfigurationManager.GetConfigurationAsync(CancellationToken.None);
+                return configuration;
+            }
+            return Options.Configuration;
         }
+
 
         /// <summary>
         /// First the Options.Events value is checked
@@ -62,7 +72,7 @@ namespace AspNetCore.Authentication.WsFederation
             }
 
             WsFederationMessage wsFederationMessage = null;
-            
+
             // assumption: if the ContentType is "application/x-www-form-urlencoded" it should be safe to read as it is small.
             if (string.Equals(Request.Method, "POST", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(Request.ContentType)
@@ -117,17 +127,19 @@ namespace AspNetCore.Authentication.WsFederation
                     return HandleRequestResult.Success(securityTokenContext.Result.Ticket);
                 }
 
-                if (_configuration == null)
+                var configuration = await GetWsFederationConfiguration();
+
+                if (configuration == null)
                 {
-                    _configuration = await Options.ConfigurationManager.GetConfigurationAsync(CancellationToken.None);
+                    return HandleRequestResult.Fail("Configuration Missing.");
                 }
 
                 // Copy and augment to avoid cross request race conditions for updated configurations.
                 var tvp = Options.TokenValidationParameters.Clone();
-                IEnumerable<string> issuers = new[] { _configuration.Issuer };
+                IEnumerable<string> issuers = new[] { configuration.Issuer };
                 tvp.ValidIssuers = tvp.ValidIssuers?.Concat(issuers) ?? issuers;
-                tvp.IssuerSigningKeys = tvp.IssuerSigningKeys?.Concat(_configuration.SigningKeys) ??
-                                        _configuration.SigningKeys;
+                tvp.IssuerSigningKeys = tvp.IssuerSigningKeys?.Concat(configuration.SigningKeys) ??
+                                        configuration.SigningKeys;
 
 
                 SecurityToken parsedToken;
@@ -200,13 +212,7 @@ namespace AspNetCore.Authentication.WsFederation
             }
         }
 
-        /// <summary>
-        ///     Override this method to deal with 401 challenge concerns, if an authentication scheme in question
-        ///     deals an authentication interaction as part of it's request flow. (like adding a response header, or
-        ///     changing the 401 result to 302 of a login page or external sign-in location.)
-        /// </summary>
-        /// <param name="properties"></param>
-        /// <returns>True if no other handlers should be called</returns>
+        /// <inheritdoc />
         protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
         {
             if (properties == null)
@@ -215,18 +221,6 @@ namespace AspNetCore.Authentication.WsFederation
             }
             Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleUnauthorizedAsync");
 
-            if (_configuration == null)
-            {
-                var httpClient = new HttpClient()
-                {
-                    Timeout = Options.BackchannelTimeout,
-                    MaxResponseContentBufferSize = 1024 * 1024 * 10
-                };
-                // 10 MB
-                var cm = new ConfigurationManager<WsFederationConfiguration>(Options.MetadataAddress, httpClient);
-
-                _configuration = await cm.GetConfigurationAsync(CancellationToken.None);
-            }
 
             var baseUri =
                 Request.Scheme +
@@ -244,9 +238,15 @@ namespace AspNetCore.Authentication.WsFederation
                 properties.RedirectUri = currentUri;
             }
 
+            var configuration = await GetWsFederationConfiguration();
+            if (configuration == null)
+            {
+                this.Response.StatusCode = 401;
+                return ;
+            }
             var wsFederationMessage = new WsFederationMessage
             {
-                IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
+                IssuerAddress = configuration.TokenEndpoint ?? string.Empty,
                 Wtrealm = Options.Wtrealm,
                 Wctx =
                     $"{WsFederationAuthenticationDefaults.WctxKey}={Uri.EscapeDataString(Options.StateDataFormat.Protect(properties))}",
@@ -283,8 +283,6 @@ namespace AspNetCore.Authentication.WsFederation
             Response.Redirect(redirectUri);
         }
 
-
-
         /// <inheritdoc />
         public async Task SignOutAsync(AuthenticationProperties properties)
         {
@@ -296,14 +294,15 @@ namespace AspNetCore.Authentication.WsFederation
 
             Logger.LogTrace($"Entering {nameof(WsFederationAuthenticationHandler)}'s HandleSignOutAsync");
 
-            if (_configuration == null && Options.ConfigurationManager != null)
+            var configuration = await GetWsFederationConfiguration();
+            if (configuration == null)
             {
-                _configuration = await Options.ConfigurationManager.GetConfigurationAsync(Context.RequestAborted);
+                return;
             }
 
             var wsFederationMessage = new WsFederationMessage
             {
-                IssuerAddress = _configuration.TokenEndpoint ?? string.Empty,
+                IssuerAddress = configuration.TokenEndpoint ?? string.Empty,
                 Wtrealm = Options.Wtrealm,
                 Wa = WsFederationActions.SignOut
             };
