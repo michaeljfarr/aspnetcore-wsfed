@@ -4,6 +4,7 @@ using System.Net.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Extensions;
 using Microsoft.IdentityModel.Protocols;
@@ -13,15 +14,19 @@ namespace AspNetCore.Authentication.WsFederation
     public class WsFederationPostConfigureOptions : IPostConfigureOptions<WsFederationAuthenticationOptions>
     {
         private readonly IDataProtectionProvider _dataProtectionProvider;
+        private readonly ILogger<WsFederationPostConfigureOptions> _logger;
 
-        public WsFederationPostConfigureOptions(IDataProtectionProvider dataProtectionProvider)
+        public WsFederationPostConfigureOptions(IDataProtectionProvider dataProtectionProvider, ILogger<WsFederationPostConfigureOptions> logger)
         {
             _dataProtectionProvider = dataProtectionProvider;
+            _logger = logger;
         }
 
         private void ApplyDefaults(WsFederationAuthenticationOptions wsFederationAuthenticationOptions)
         {
+            _logger.LogTrace("ConfigureOptions start");
             ConfigureOptions(_dataProtectionProvider, wsFederationAuthenticationOptions);
+            _logger.LogTrace($"ConfigureOptions complete, Audience: {wsFederationAuthenticationOptions?.TokenValidationParameters?.ValidAudience}, AuthType: {wsFederationAuthenticationOptions?.TokenValidationParameters?.AuthenticationType}, IsConfigurationManager not null:{wsFederationAuthenticationOptions?.ConfigurationManager != null}, CallbackPath {wsFederationAuthenticationOptions?.CallbackPath}");
         }
         public void PostConfigure(string name, WsFederationAuthenticationOptions options)
         {

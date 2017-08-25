@@ -26,16 +26,20 @@ namespace AspNetCore.Authentication.WsFederation
 
         private async Task<WsFederationConfiguration> GetWsFederationConfiguration()
         {
+            Logger.LogTrace("GetWsFederationConfiguration start");
             if (Options.Configuration == null && Options.ConfigurationManager == null)
             {
-                Logger.LogCritical("Configuration and ConfigurationManager are both null.  WsFederationPostConfigureOptions should at least configure ConfigurationManager.");
+                Logger.LogCritical("Configuration and ConfigurationManager are both null. WsFederationPostConfigureOptions should at least configure ConfigurationManager.");
             }
             if (Options.ConfigurationManager != null)
             {
+                Logger.LogTrace("GetWsFederationConfiguration GetConfigurationAsync start");
                 //in theory ConfigurationManager is caching and refreshing this data appropriately, so we dont need to hold on to an instance of this.
                 var configuration = await Options.ConfigurationManager.GetConfigurationAsync(CancellationToken.None);
+                Logger.LogTrace($"GetWsFederationConfiguration GetConfigurationAsync complete with configuration not null: {configuration != null}");
                 return configuration;
             }
+            Logger.LogTrace($"GetWsFederationConfiguration complete with Configuration not null: {Options.Configuration != null}");
             return Options.Configuration;
         }
 
@@ -53,18 +57,17 @@ namespace AspNetCore.Authentication.WsFederation
 
         public override Task<bool> ShouldHandleRequestAsync()
         {
-            return Task.FromResult<bool>(Options.CallbackPath.HasValue && Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase));
+            var handle = Options.CallbackPath.HasValue &&
+                         Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase);
+            Logger.LogTrace($"ShouldHandleRequestAsync({Request.Path}) = {handle} ");
+            return Task.FromResult<bool>(handle);
         }
 
-        /// <summary>
-        ///     Authenticate the user identity with the identity provider.
-        ///     The method process the request on the endpoint defined by CallbackPath.
-        /// </summary>
+        /// <inheritdoc />
         protected override async Task<HandleRequestResult> HandleRemoteAuthenticateAsync()
         {
             // Allow login to be constrained to a specific path.
             if (!await ShouldHandleRequestAsync())
-            //if (Options.CallbackPath.HasValue && !Options.CallbackPath.Equals(Request.Path, StringComparison.OrdinalIgnoreCase))
             {
                 // Not for us.
                 Logger.LogDebug($"Skipping {Options.CallbackPath} != {Request.Path}");
@@ -77,8 +80,7 @@ namespace AspNetCore.Authentication.WsFederation
             if (string.Equals(Request.Method, "POST", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(Request.ContentType)
                 // May have media/type; charset=utf-8, allow partial match.
-                &&
-                Request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
+                && Request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
                 && Request.Body.CanRead)
             {
                 if (!Request.Body.CanSeek)
@@ -182,8 +184,7 @@ namespace AspNetCore.Authentication.WsFederation
                     ticket.Properties.AllowRefresh = false;
                 }
 
-                var securityTokenValidatedNotification = await RunSecurityTokenValidatedEventAsync(wsFederationMessage,
-                    ticket);
+                var securityTokenValidatedNotification = await RunSecurityTokenValidatedEventAsync(wsFederationMessage, ticket);
                 if (securityTokenValidatedNotification.Result != null && securityTokenValidatedNotification.Result.Handled)
                 {
                     return HandleRequestResult.Success(securityTokenValidatedNotification.Result.Ticket);
@@ -242,7 +243,7 @@ namespace AspNetCore.Authentication.WsFederation
             if (configuration == null)
             {
                 this.Response.StatusCode = 401;
-                return ;
+                return;
             }
             var wsFederationMessage = new WsFederationMessage
             {
